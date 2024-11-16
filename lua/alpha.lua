@@ -623,21 +623,23 @@ function alpha.draw(conf, state)
     -- when the screen is cleared and then redrawn
     -- so we save the index before that happens
     local ix = cursor_ix
-    vim.api.nvim_buf_set_option(state.buffer, "modifiable", true)
-    vim.api.nvim_buf_clear_namespace(state.buffer, -1, 0, -1)
-    vim.api.nvim_buf_set_lines(state.buffer, 0, -1, false, {})
-    layout(conf, state)
-    vim.api.nvim_buf_set_option(state.buffer, "modifiable", false)
-    local active_win = active_window(state)
-    if vim.api.nvim_get_current_win() == active_win then
-        if #cursor_jumps ~= 0 then
-            -- TODO: this is pcalled because a bunch of window events
-            -- like WinEnter will say 'alpha' is the current open buffer
-            -- and then immedietely unload it
-            pcall(vim.api.nvim_win_set_cursor, active_win, cursor_jumps[ix])
-        end
-    end
-    draw_presses(state)
+    pcall(function()
+      vim.api.nvim_buf_set_option(state.buffer, "modifiable", true)
+      vim.api.nvim_buf_clear_namespace(state.buffer, -1, 0, -1)
+      vim.api.nvim_buf_set_lines(state.buffer, 0, -1, false, {})
+      layout(conf, state)
+      vim.api.nvim_buf_set_option(state.buffer, "modifiable", false)
+      local active_win = active_window(state)
+      if vim.api.nvim_get_current_win() == active_win then
+          if #cursor_jumps ~= 0 then
+              -- TODO: this is pcalled because a bunch of window events
+              -- like WinEnter will say 'alpha' is the current open buffer
+              -- and then immedietely unload it
+              pcall(vim.api.nvim_win_set_cursor, active_win, cursor_jumps[ix])
+          end
+      end
+      draw_presses(state)
+    end)
 end
 
 function alpha.move_cursor(window)
