@@ -419,11 +419,48 @@ local keymaps_element = {}
 keymaps_element.text = noop
 keymaps_element.padding = noop
 
+local function keymap_mode_str(mode)
+    return type(mode) == "table" and table.concat(mode, "\1") or mode
+end
+
+local function keymap_bind_id(mode, lhs)
+    return keymap_mode_str(mode) .. "\0" .. lhs
+end
+
+local function keymap_set_id(keymap)
+    local mode, lhs, rhs = keymap[1], keymap[2], keymap[3]
+    local rhs_id = type(rhs) == "string" and rhs or tostring(rhs)
+    return keymap_bind_id(mode, lhs) .. "\0" .. rhs_id
+end
+
 ---@diagnostic disable-next-line: unused-local
 function keymaps_element.button(el, conf, state)
-    if el.opts and el.opts.keymap then
-        el.opts.keymap[4] = vim.tbl_extend("force", el.opts.keymap[4] or {}, { buffer = state.buffer })
-        vim.keymap.set(unpack(el.opts.keymap))
+    local keymap = el.opts and el.opts.keymap
+    if not keymap then
+        return
+    end
+    local tracked = state.button_keymaps
+    if not tracked then
+        return
+    end
+
+    local set_id = keymap_set_id(keymap)
+    if state.button_keymaps_applied[set_id] then
+        return
+    end
+
+    local opts = keymap[4]
+    if not opts or opts.buffer ~= state.buffer then
+        opts = vim.tbl_extend("force", opts or {}, { buffer = state.buffer })
+        keymap[4] = opts
+    end
+    vim.keymap.set(unpack(keymap))
+    state.button_keymaps_applied[set_id] = true
+
+    local mode, lhs = keymap[1], keymap[2]
+    local bind_id = keymap_bind_id(mode, lhs)
+    if not tracked[bind_id] then
+        tracked[bind_id] = { mode, lhs }
     end
 end
 
@@ -439,10 +476,35 @@ function keymaps_element.group(el, conf, state)
     end
 end
 
+local function clear_button_keymaps(state)
+    local prev = state.button_keymaps
+    if not prev then
+        return
+    end
+    if vim.api.nvim_buf_is_valid(state.buffer) then
+        local opts = { buffer = state.buffer }
+        for _, km in pairs(prev) do
+            local ok, err = pcall(vim.keymap.del, km[1], km[2], opts)
+            if not ok then
+                vim.notify("alpha: failed to delete keymap: " .. err, vim.log.levels.WARN)
+            end
+        end
+    end
+    state.button_keymaps = nil
+    state.button_keymaps_applied = nil
+    state.keymaps_layout = nil
+end
+
+-- Owns clear+apply. Called from draw (and :AlphaRemap), not keymaps_element.* alone —
+-- otherwise stale button maps are never removed.
 local function keymaps(conf, state)
+    clear_button_keymaps(state)
+    state.button_keymaps = {}
+    state.button_keymaps_applied = {}
     for _, el in pairs(conf.layout) do
         keymaps_element[el.type](el, conf, state)
     end
+    state.keymaps_layout = conf.layout
 end
 
 -- dragons
@@ -656,6 +718,9 @@ function alpha.draw(conf, state)
         end
     end
     draw_presses(state)
+    if state.keymaps_layout ~= conf.layout then
+        keymaps(conf, state)
+    end
 end
 
 function alpha.move_cursor(window)
@@ -742,7 +807,6 @@ function alpha.start(on_vimenter, conf)
     alpha.draw(conf, state)
 
     vim.api.nvim_exec_autocmds("User", { pattern = "AlphaReady" })
-    keymaps(conf, state)
 end
 
 function alpha.setup(config)
